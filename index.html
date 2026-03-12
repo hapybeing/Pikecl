@@ -1066,4 +1066,34 @@
       </div>
     </div>
   </div>
-</fo
+</footer>
+
+<!-- Inline failsafe: kills preloader even if module JS fails -->
+<script>
+  (function() {
+    function killPreloader() {
+      var el = document.getElementById('preloader');
+      if (!el) return;
+      el.style.transition = 'opacity 0.8s ease';
+      el.style.opacity = '0';
+      el.style.pointerEvents = 'none';
+      setTimeout(function() {
+        el.style.display = 'none';
+        document.body.style.overflow = '';
+      }, 850);
+    }
+    // Failsafe: force-kill after 5s no matter what
+    setTimeout(killPreloader, 5000);
+    // Also kill on DOMContentLoaded if modules haven't fired
+    document.addEventListener('DOMContentLoaded', function() {
+      setTimeout(killPreloader, 3500);
+    });
+    // Expose so module JS can call it earlier
+    window._killPreloader = killPreloader;
+  })();
+</script>
+
+<script type="module" src="js/main.js"></script>
+
+</body>
+</html>
