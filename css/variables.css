@@ -1,0 +1,119 @@
+/* ============================================================
+   VOSS — DESIGN TOKENS
+   Dr. Elara Voss · Neural Cartography Research
+   ============================================================ */
+
+:root {
+
+  /* ── PALETTE ───────────────────────────────────────────── */
+  --c-bg:           #111113;
+  --c-bg-alt:       #161618;
+  --c-bg-deep:      #0d0d0f;
+  --c-surface:      #1c1c20;
+  --c-surface-2:    #222228;
+  --c-panel:        #242428;
+  --c-border:       rgba(255, 255, 255, 0.07);
+  --c-border-mid:   rgba(255, 255, 255, 0.12);
+  --c-border-gold:  rgba(201, 168, 76, 0.25);
+
+  /* Text */
+  --c-text:         #f0ede8;
+  --c-text-mid:     rgba(240, 237, 232, 0.65);
+  --c-text-dim:     rgba(240, 237, 232, 0.35);
+  --c-text-ghost:   rgba(240, 237, 232, 0.12);
+
+  /* Gold accent family */
+  --c-gold:         #c9a84c;
+  --c-gold-light:   #e2c472;
+  --c-gold-dark:    #9e7d2e;
+  --c-gold-glow:    rgba(201, 168, 76, 0.18);
+  --c-gold-subtle:  rgba(201, 168, 76, 0.08);
+
+  /* Functional */
+  --c-signal:       #d4a843;   /* neuron firing pulse */
+  --c-axon:         rgba(201, 168, 76, 0.22);
+  --c-synapse:      rgba(201, 168, 76, 0.55);
+  --c-resting:      rgba(180, 170, 155, 0.18);
+
+  /* ── TYPOGRAPHY ────────────────────────────────────────── */
+  --font-display:  'Playfair Display', Georgia, serif;
+  --font-body:     'Lora', Georgia, serif;
+  --font-mono:     'DM Mono', 'Courier New', monospace;
+  --font-ui:       'Inter', system-ui, sans-serif;
+
+  /* Scale (major third — 1.25) */
+  --text-xs:   0.64rem;    /* 10.24px */
+  --text-sm:   0.8rem;     /* 12.8px  */
+  --text-base: 1rem;       /* 16px    */
+  --text-md:   1.25rem;    /* 20px    */
+  --text-lg:   1.563rem;   /* 25px    */
+  --text-xl:   1.953rem;   /* 31px    */
+  --text-2xl:  2.441rem;   /* 39px    */
+  --text-3xl:  3.052rem;   /* 49px    */
+  --text-4xl:  3.815rem;   /* 61px    */
+  --text-5xl:  4.768rem;   /* 76px    */
+  --text-6xl:  5.96rem;    /* 95px    */
+  --text-hero: clamp(4.5rem, 10vw, 9rem);
+
+  /* ── SPACING ───────────────────────────────────────────── */
+  --sp-1:   0.25rem;
+  --sp-2:   0.5rem;
+  --sp-3:   0.75rem;
+  --sp-4:   1rem;
+  --sp-5:   1.25rem;
+  --sp-6:   1.5rem;
+  --sp-8:   2rem;
+  --sp-10:  2.5rem;
+  --sp-12:  3rem;
+  --sp-16:  4rem;
+  --sp-20:  5rem;
+  --sp-24:  6rem;
+  --sp-32:  8rem;
+  --sp-40:  10rem;
+  --sp-48:  12rem;
+  --sp-56:  14rem;
+
+  /* ── RADIUS ────────────────────────────────────────────── */
+  --r-sm:   2px;
+  --r-md:   4px;
+  --r-lg:   8px;
+  --r-xl:   16px;
+  --r-full: 9999px;
+
+  /* ── SHADOWS ───────────────────────────────────────────── */
+  --shadow-sm:    0 1px 3px rgba(0,0,0,0.4);
+  --shadow-md:    0 4px 16px rgba(0,0,0,0.5);
+  --shadow-lg:    0 12px 40px rgba(0,0,0,0.6);
+  --shadow-gold:  0 0 40px rgba(201,168,76,0.15);
+  --shadow-gold-strong: 0 0 80px rgba(201,168,76,0.25);
+  --shadow-inset: inset 0 1px 0 rgba(255,255,255,0.05);
+
+  /* ── EASING ────────────────────────────────────────────── */
+  --ease-out:       cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out:    cubic-bezier(0.76, 0, 0.24, 1);
+  --ease-spring:    cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-linear:    linear;
+
+  /* ── DURATION ──────────────────────────────────────────── */
+  --dur-fast:   150ms;
+  --dur-base:   300ms;
+  --dur-slow:   600ms;
+  --dur-slower: 900ms;
+  --dur-film:   1200ms;
+
+  /* ── LAYOUT ────────────────────────────────────────────── */
+  --max-w:        1500px;
+  --max-w-text:   680px;
+  --max-w-narrow: 520px;
+  --nav-h:        88px;
+  --gutter:       clamp(1.5rem, 4vw, 4rem);
+
+  /* ── Z-INDEX STACK ─────────────────────────────────────── */
+  --z-canvas:    0;
+  --z-content:   10;
+  --z-nav:       100;
+  --z-ticker:    90;
+  --z-cursor:    9000;
+  --z-preloader: 9500;
+  --z-modal:     8000;
+}
