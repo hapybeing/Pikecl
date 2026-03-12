@@ -1,8 +1,7 @@
 /* ============================================================
-   VOSS — NEURAL CANVAS
-   Living connectome visualization.
-   Neurons fire, action potentials cascade along axons,
-   mouse proximity triggers local activation.
+   VOSS — NEURAL CANVAS v2
+   Upgraded: cortical column clustering, depth layering,
+   richer glow, better cascade timing, wave propagation.
    ============================================================ */
 
 export function initNeuralCanvas() {
@@ -10,376 +9,240 @@ export function initNeuralCanvas() {
   if (!canvas) return;
 
   const ctx = canvas.getContext('2d');
-
-  // ── Config ───────────────────────────────────────────────
-  const CFG = {
-    neuronCount:       88,
-    maxConnections:    5,        // max axons per neuron
-    connectionRadius:  180,      // px — neurons within this range may connect
-    restingColor:      'rgba(180,165,140,0.18)',
-    axonColor:         'rgba(201,168,76,0.14)',
-    fireColor:         '#c9a84c',
-    fireGlowColor:     'rgba(201,168,76,0.55)',
-    pulseColor:        'rgba(201,168,76,0.9)',
-    bgGrid:            'rgba(201,168,76,0.025)',
-    mouseRadius:       130,      // px — mouse activation zone
-    mouseStrength:     0.6,
-    fireDuration:      420,      // ms a neuron stays fired
-    refractoryPeriod:  900,      // ms before neuron can fire again
-    cascadeDelay:      80,       // ms between cascade hops
-    spontaneousRate:   0.0012,   // probability per frame to self-fire
-    pulseSpeed:        2.2,      // px per frame along axon
-    neuronMinR:        2.2,
-    neuronMaxR:        5,
-    dpr:               Math.min(window.devicePixelRatio || 1, 2),
-  };
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
 
   let W = 0, H = 0;
   let neurons = [];
   let mouse = { x: -9999, y: -9999, active: false };
-  let lastMouse = performance.now();
 
-  // ── Neuron class ─────────────────────────────────────────
+  const CFG = {
+    neuronCount:       140,
+    clusterCount:      7,
+    clusterRadius:     110,
+    connectionRadius:  160,
+    maxConnDist:       190,
+    fireDuration:      400,
+    refractoryMs:      1100,
+    cascadeDelayBase:  65,
+    cascadeJitter:     40,
+    pulseSpeed:        2.6,
+    spontaneousRate:   0.0008,
+    mouseRadius:       150,
+    mouseFireProb:     0.05,
+    dpr,
+  };
+
   class Neuron {
-    constructor(x, y) {
-      this.x = x;
-      this.y = y;
-      this.r = CFG.neuronMinR + Math.random() * (CFG.neuronMaxR - CFG.neuronMinR);
-      this.connections = []; // indices
-      this.pulses = [];      // active action potentials outgoing
-      this.state = 'resting'; // resting | firing | refractory
-      this.fireStart = 0;
+    constructor(x, y, depth, clusterId) {
+      this.bx = x; this.by = y;
+      this.x  = x; this.y  = y;
+      this.depth     = depth;
+      this.clusterId = clusterId;
+      this.r         = (1.5 + Math.random() * 2.5) * (0.6 + depth * 0.7);
+      this.alpha     = 0.15 + depth * 0.55;
+      this.phase     = Math.random() * Math.PI * 2;
+      this.phaseSpd  = 0.002 + Math.random() * 0.005;
+      this.driftAmt  = 4 + depth * 3;
+      this.connections = [];
+      this.pulses    = [];
+      this.state     = 'resting';
+      this.fireT     = 0;
       this.fireAlpha = 0;
-      this.glowSize  = 0;
-      this.driftVx = (Math.random() - 0.5) * 0.08;
-      this.driftVy = (Math.random() - 0.5) * 0.08;
-      this.baseX = x;
-      this.baseY = y;
-      this.phase  = Math.random() * Math.PI * 2;
-      this.phaseSpeed = 0.003 + Math.random() * 0.006;
     }
 
-    fire(time, sourceIdx) {
+    fire(now) {
       if (this.state !== 'resting') return false;
       this.state     = 'firing';
-      this.fireStart = time;
+      this.fireT     = now;
       this.fireAlpha = 1;
-      this.glowSize  = this.r * 4;
-
-      // Schedule cascade to connected neurons
-      this.connections.forEach((targetIdx, i) => {
-        const delay = CFG.cascadeDelay * (i + 1) + Math.random() * 60;
-        this.pulses.push({
-          targetIdx,
-          progress: 0,       // 0..1 along axon
-          speed: CFG.pulseSpeed / this._axonLength(targetIdx),
-          delay,
-          startTime: time + delay,
-          alpha: 1,
-        });
+      this.connections.forEach((ti, i) => {
+        const delay  = CFG.cascadeDelayBase * (i * 0.6 + 1) + Math.random() * CFG.cascadeJitter;
+        const target = neurons[ti];
+        if (!target) return;
+        const dx = target.bx - this.bx, dy = target.by - this.by;
+        const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+        this.pulses.push({ ti, progress: 0, speed: CFG.pulseSpeed / dist, startT: now + delay, alpha: 1 });
       });
-
       return true;
     }
 
-    _axonLength(targetIdx) {
-      const t = neurons[targetIdx];
-      if (!t) return 1;
-      const dx = t.x - this.x;
-      const dy = t.y - this.y;
-      return Math.max(Math.sqrt(dx*dx + dy*dy), 1);
-    }
+    update(now) {
+      this.phase += this.phaseSpd;
+      this.x = this.bx + Math.sin(this.phase)       * this.driftAmt;
+      this.y = this.by + Math.cos(this.phase * 0.73) * this.driftAmt * 0.6;
 
-    update(time, dt) {
-      // Drift (subtle Lissajous)
-      this.phase += this.phaseSpeed;
-      this.x = this.baseX + Math.sin(this.phase) * 6;
-      this.y = this.baseY + Math.cos(this.phase * 0.7) * 4;
-
-      // State transitions
       if (this.state === 'firing') {
-        const elapsed = time - this.fireStart;
-        this.fireAlpha = Math.max(0, 1 - elapsed / CFG.fireDuration);
-        this.glowSize  = this.r * (4 + 3 * this.fireAlpha);
-
-        if (elapsed > CFG.fireDuration) {
-          this.state = 'refractory';
-          this.fireStart = time;
-        }
+        const el = now - this.fireT;
+        this.fireAlpha = Math.max(0, 1 - el / CFG.fireDuration);
+        if (el > CFG.fireDuration) { this.state = 'refractory'; this.fireT = now; }
       } else if (this.state === 'refractory') {
-        if (time - this.fireStart > CFG.refractoryPeriod) {
-          this.state = 'resting';
-        }
+        if (now - this.fireT > CFG.refractoryMs) this.state = 'resting';
       } else {
-        // Spontaneous firing
-        if (Math.random() < CFG.spontaneousRate) {
-          this.fire(time, -1);
-        }
-
-        // Mouse proximity activation
-        const mdx = mouse.x - this.x;
-        const mdy = mouse.y - this.y;
+        if (Math.random() < CFG.spontaneousRate) this.fire(now);
+        const mdx = mouse.x - this.x, mdy = mouse.y - this.y;
         const md2 = mdx*mdx + mdy*mdy;
-        if (md2 < CFG.mouseRadius * CFG.mouseRadius && mouse.active) {
-          const prob = (1 - Math.sqrt(md2) / CFG.mouseRadius) * 0.04;
-          if (Math.random() < prob) {
-            this.fire(time, -2);
-          }
+        if (mouse.active && md2 < CFG.mouseRadius**2) {
+          const str = (1 - Math.sqrt(md2) / CFG.mouseRadius) * CFG.mouseFireProb;
+          if (Math.random() < str) this.fire(now);
         }
       }
 
-      // Update outgoing pulses
       this.pulses = this.pulses.filter(p => {
-        if (time < p.startTime) return true;
+        if (now < p.startT) return true;
         p.progress += p.speed;
-        if (p.progress >= 1) {
-          // Pulse arrived — fire target neuron
-          const target = neurons[p.targetIdx];
-          target?.fire(time, -3);
-          return false;
-        }
+        if (p.progress >= 1) { neurons[p.ti]?.fire(now); return false; }
         return true;
       });
     }
 
-    draw(ctx) {
-      const isFiring     = this.state === 'firing' && this.fireAlpha > 0.01;
-      const isRefractory = this.state === 'refractory';
-
-      if (isFiring) {
-        // Glow rings
-        const glowA = this.fireAlpha * 0.35;
-        ctx.save();
-        ctx.shadowBlur = 0;
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.glowSize, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(201,168,76,${glowA * 0.25})`;
-        ctx.fill();
-
-        // Inner glow
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.r * 2.5, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(201,168,76,${glowA * 0.6})`;
-        ctx.fill();
-
-        // Core
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(226,196,114,${this.fireAlpha})`;
-        ctx.shadowColor = CFG.fireGlowColor;
-        ctx.shadowBlur  = 14;
-        ctx.fill();
-        ctx.restore();
-
-      } else if (isRefractory) {
-        // Dim dot
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.r * 0.6, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(130,115,90,0.25)';
-        ctx.fill();
-
-      } else {
-        // Resting
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
-        ctx.fillStyle = CFG.restingColor;
-        ctx.fill();
-      }
-
-      // Draw pulses (action potentials)
+    drawPulses(ctx) {
       this.pulses.forEach(p => {
-        if (performance.now() < p.startTime) return;
-        const target = neurons[p.targetIdx];
-        if (!target) return;
-
-        const px = this.x + (target.x - this.x) * p.progress;
-        const py = this.y + (target.y - this.y) * p.progress;
-
-        // Trailing glow
-        const grad = ctx.createRadialGradient(px, py, 0, px, py, 8);
-        grad.addColorStop(0, `rgba(201,168,76,${p.alpha * 0.95})`);
-        grad.addColorStop(0.4, `rgba(201,168,76,${p.alpha * 0.35})`);
-        grad.addColorStop(1, 'transparent');
-
-        ctx.beginPath();
-        ctx.arc(px, py, 8, 0, Math.PI * 2);
-        ctx.fillStyle = grad;
-        ctx.fill();
-
-        // Bright core dot
-        ctx.beginPath();
-        ctx.arc(px, py, 2.5, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(240,220,160,${p.alpha})`;
-        ctx.fill();
+        if (performance.now() < p.startT) return;
+        const t = neurons[p.ti]; if (!t) return;
+        const px = this.x + (t.x - this.x) * p.progress;
+        const py = this.y + (t.y - this.y) * p.progress;
+        const gr = 9 * this.depth + 4;
+        const g = ctx.createRadialGradient(px, py, 0, px, py, gr);
+        g.addColorStop(0,   `rgba(201,168,76,${p.alpha * 0.9})`);
+        g.addColorStop(0.4, `rgba(201,168,76,${p.alpha * 0.28})`);
+        g.addColorStop(1,   'transparent');
+        ctx.beginPath(); ctx.arc(px, py, gr, 0, Math.PI*2); ctx.fillStyle = g; ctx.fill();
+        ctx.beginPath(); ctx.arc(px, py, 2 + this.depth, 0, Math.PI*2);
+        ctx.fillStyle = `rgba(236,210,140,${p.alpha})`; ctx.fill();
       });
+    }
+
+    drawBody(ctx) {
+      const isFiring = this.state === 'firing' && this.fireAlpha > 0.01;
+      const isRefrac = this.state === 'refractory';
+      if (isFiring) {
+        const fa = this.fireAlpha, glowR = this.r * (3 + 4 * fa);
+        const bloom = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, glowR * 2.5);
+        bloom.addColorStop(0, `rgba(201,168,76,${fa * 0.22})`);
+        bloom.addColorStop(0.5, `rgba(201,168,76,${fa * 0.06})`);
+        bloom.addColorStop(1, 'transparent');
+        ctx.beginPath(); ctx.arc(this.x, this.y, glowR*2.5, 0, Math.PI*2); ctx.fillStyle = bloom; ctx.fill();
+        const inner = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, glowR);
+        inner.addColorStop(0,   `rgba(240,215,145,${fa * 0.9})`);
+        inner.addColorStop(0.4, `rgba(201,168,76,${fa * 0.5})`);
+        inner.addColorStop(1,   'transparent');
+        ctx.beginPath(); ctx.arc(this.x, this.y, glowR, 0, Math.PI*2); ctx.fillStyle = inner; ctx.fill();
+        ctx.beginPath(); ctx.arc(this.x, this.y, this.r, 0, Math.PI*2);
+        ctx.fillStyle = `rgba(245,220,155,${fa})`; ctx.fill();
+      } else if (isRefrac) {
+        ctx.beginPath(); ctx.arc(this.x, this.y, this.r*0.55, 0, Math.PI*2);
+        ctx.fillStyle = `rgba(140,125,95,${this.alpha * 0.3})`; ctx.fill();
+      } else {
+        if (this.depth > 0.5) {
+          const rg = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.r*2.5);
+          rg.addColorStop(0, `rgba(201,168,76,${this.alpha*0.15})`);
+          rg.addColorStop(1, 'transparent');
+          ctx.beginPath(); ctx.arc(this.x, this.y, this.r*2.5, 0, Math.PI*2); ctx.fillStyle = rg; ctx.fill();
+        }
+        ctx.beginPath(); ctx.arc(this.x, this.y, this.r, 0, Math.PI*2);
+        ctx.fillStyle = `rgba(185,170,140,${this.alpha * 0.55})`; ctx.fill();
+      }
     }
   }
 
-  // ── Build graph ──────────────────────────────────────────
-  function buildGraph() {
+  function buildNetwork() {
     neurons = [];
+    const clusters = Array.from({ length: CFG.clusterCount }, (_, i) => {
+      const angle  = (Math.PI*2 / CFG.clusterCount) * i + Math.random() * 0.5;
+      const radius = 0.22 + Math.random() * 0.24;
+      return { cx: W*0.5 + Math.cos(angle)*W*radius, cy: H*0.5 + Math.sin(angle)*H*radius*0.72 };
+    });
 
-    // Distribute neurons in a scattered grid with jitter
-    const cols = Math.ceil(Math.sqrt(CFG.neuronCount * (W / H)));
-    const rows = Math.ceil(CFG.neuronCount / cols);
-
-    const cellW = W / cols;
-    const cellH = H / rows;
-
-    let count = 0;
-    for (let r = 0; r < rows && count < CFG.neuronCount; r++) {
-      for (let c = 0; c < cols && count < CFG.neuronCount; c++) {
-        const x = cellW * (c + 0.2 + Math.random() * 0.6);
-        const y = cellH * (r + 0.2 + Math.random() * 0.6);
-        neurons.push(new Neuron(x, y));
-        count++;
-      }
+    for (let i = 0; i < CFG.neuronCount; i++) {
+      const cid = i % CFG.clusterCount;
+      const {cx, cy} = clusters[cid];
+      const a   = Math.random() * Math.PI * 2;
+      const r   = Math.pow(Math.random(), 0.6) * CFG.clusterRadius;
+      const dep = 0.2 + Math.random() * 0.8;
+      neurons.push(new Neuron(cx + Math.cos(a)*r, cy + Math.sin(a)*r, dep, cid));
     }
+    neurons.sort((a, b) => a.depth - b.depth);
 
-    // Connect nearby neurons (sparse random wiring)
     neurons.forEach((n, i) => {
-      // Find nearby candidates
-      const nearby = neurons
-        .map((m, j) => {
-          if (i === j) return null;
-          const dx = m.x - n.x;
-          const dy = m.y - n.y;
-          const d  = Math.sqrt(dx*dx + dy*dy);
-          return d < CFG.connectionRadius ? { j, d } : null;
-        })
-        .filter(Boolean)
-        .sort((a, b) => a.d - b.d);
-
-      // Pick up to maxConnections, biased toward closer neurons
-      const picks = Math.floor(1 + Math.random() * CFG.maxConnections);
-      const count = Math.min(picks, nearby.length);
-
-      for (let k = 0; k < count; k++) {
-        if (!n.connections.includes(nearby[k].j)) {
-          n.connections.push(nearby[k].j);
-        }
-      }
+      const cands = neurons.map((m, j) => {
+        if (i === j) return null;
+        const dx = m.bx - n.bx, dy = m.by - n.by;
+        const d = Math.sqrt(dx*dx + dy*dy);
+        if (d > CFG.maxConnDist) return null;
+        const bonus = m.clusterId === n.clusterId ? 60 : 0;
+        return { j, score: d - bonus };
+      }).filter(Boolean).sort((a, b) => a.score - b.score).slice(0, 3 + Math.floor(Math.random()*3));
+      cands.forEach(c => { if (!n.connections.includes(c.j)) n.connections.push(c.j); });
     });
   }
 
-  // ── Draw axons ───────────────────────────────────────────
+  function drawGrid() {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(201,168,76,0.022)';
+    ctx.lineWidth = 0.5;
+    for (let x = 32; x < W; x += 64) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+    for (let y = 32; y < H; y += 64) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+    ctx.restore();
+  }
+
   function drawAxons() {
+    const drawn = new Set();
     neurons.forEach((n, i) => {
       n.connections.forEach(j => {
-        // Avoid double-drawing
-        if (j < i) return;
-
+        const key = i < j ? `${i}-${j}` : `${j}-${i}`;
+        if (drawn.has(key)) return; drawn.add(key);
         const t = neurons[j];
-        const dx = t.x - n.x;
-        const dy = t.y - n.y;
+        const dx = t.x - n.x, dy = t.y - n.y;
         const d  = Math.sqrt(dx*dx + dy*dy);
-        const alpha = Math.max(0, 1 - d / CFG.connectionRadius) * 0.55;
-
-        ctx.beginPath();
-        ctx.moveTo(n.x, n.y);
-        ctx.lineTo(t.x, t.y);
-        ctx.strokeStyle = `rgba(201,168,76,${alpha * 0.28})`;
-        ctx.lineWidth   = 0.5;
+        const da = (n.depth + t.depth) * 0.5;
+        const fa = Math.max(0, 1 - d / CFG.connectionRadius) * da * 0.38;
+        ctx.beginPath(); ctx.moveTo(n.x, n.y); ctx.lineTo(t.x, t.y);
+        ctx.strokeStyle = `rgba(201,168,76,${fa})`;
+        ctx.lineWidth   = 0.35 + da * 0.55;
         ctx.stroke();
       });
     });
   }
 
-  // ── Background grid ──────────────────────────────────────
-  function drawGrid() {
-    const step = 72;
-    ctx.save();
-    ctx.strokeStyle = CFG.bgGrid;
-    ctx.lineWidth   = 0.5;
-
-    for (let x = 0; x < W; x += step) {
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
-    }
-    for (let y = 0; y < H; y += step) {
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
-    }
-
-    ctx.restore();
+  function drawVignette() {
+    const vg = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, Math.max(W,H)*0.7);
+    vg.addColorStop(0,    'rgba(17,17,19,0)');
+    vg.addColorStop(0.52, 'rgba(17,17,19,0)');
+    vg.addColorStop(1,    'rgba(17,17,19,0.97)');
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
   }
 
-  // ── Resize ───────────────────────────────────────────────
   function resize() {
-    W = canvas.offsetWidth;
-    H = canvas.offsetHeight;
-    canvas.width  = W * CFG.dpr;
-    canvas.height = H * CFG.dpr;
-    ctx.scale(CFG.dpr, CFG.dpr);
-    buildGraph();
+    W = canvas.offsetWidth; H = canvas.offsetHeight;
+    canvas.width = W*dpr; canvas.height = H*dpr;
+    ctx.scale(dpr, dpr);
+    buildNetwork();
   }
 
-  let resizeTimer = null;
-  window.addEventListener('resize', () => {
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(resize, 200);
-  });
-
+  let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(resize, 180); });
   resize();
 
-  // ── Mouse events ─────────────────────────────────────────
   const heroEl = document.getElementById('hero');
-
-  heroEl?.addEventListener('mousemove', (e) => {
-    const rect = canvas.getBoundingClientRect();
-    mouse.x = e.clientX - rect.left;
-    mouse.y = e.clientY - rect.top;
-    mouse.active = true;
-    lastMouse = performance.now();
+  heroEl?.addEventListener('mousemove', e => {
+    const r = canvas.getBoundingClientRect();
+    mouse.x = e.clientX - r.left; mouse.y = e.clientY - r.top; mouse.active = true;
   });
+  heroEl?.addEventListener('mouseleave', () => { mouse.active = false; mouse.x = -9999; mouse.y = -9999; });
 
-  heroEl?.addEventListener('mouseleave', () => {
-    mouse.active = false;
-    mouse.x = -9999;
-    mouse.y = -9999;
-  });
+  setTimeout(() => {
+    const count = Math.max(5, Math.floor(neurons.length * 0.06));
+    [...Array(neurons.length).keys()].sort(() => Math.random()-0.5).slice(0,count)
+      .forEach((idx, k) => setTimeout(() => neurons[idx]?.fire(performance.now()), k*140 + 400));
+  }, 700);
 
-  // ── Seed initial fires ───────────────────────────────────
-  function seedFires() {
-    const count = Math.max(3, Math.floor(neurons.length * 0.05));
-    const indices = [...Array(neurons.length).keys()]
-      .sort(() => Math.random() - 0.5)
-      .slice(0, count);
-
-    indices.forEach((idx, i) => {
-      setTimeout(() => {
-        neurons[idx]?.fire(performance.now(), -1);
-      }, i * 180);
-    });
-  }
-
-  setTimeout(seedFires, 600);
-
-  // ── Render loop ──────────────────────────────────────────
-  let lastTime = performance.now();
-
-  function render(time) {
-    const dt = time - lastTime;
-    lastTime  = time;
-
+  function render(now) {
     ctx.clearRect(0, 0, W, H);
-
-    drawGrid();
-    drawAxons();
-
-    neurons.forEach(n => {
-      n.update(time, dt);
-      n.draw(ctx);
-    });
-
-    // Radial vignette
-    const vg = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, Math.max(W, H) * 0.72);
-    vg.addColorStop(0,   'rgba(13,13,15,0)');
-    vg.addColorStop(0.7, 'rgba(13,13,15,0)');
-    vg.addColorStop(1,   'rgba(13,13,15,0.92)');
-    ctx.fillStyle = vg;
-    ctx.fillRect(0, 0, W, H);
-
+    drawGrid(); drawAxons();
+    neurons.forEach(n => n.update(now));
+    neurons.forEach(n => n.drawPulses(ctx));
+    neurons.forEach(n => n.drawBody(ctx));
+    drawVignette();
     requestAnimationFrame(render);
   }
-
   requestAnimationFrame(render);
 }
